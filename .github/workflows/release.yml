@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     permissions:
       contents: write
 
@@ -21,12 +21,22 @@ jobs:
         with:
           flutter-version: '3.x'
           channel: 'stable'
+      - name: Setup Homebrew
+        id: set-up-homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+      - name: Setup macOS build dependencies
+        run: brew install cmake llvm binaryen wasi-libc wasi-runtimes
 
       - name: Install Melos
         run: flutter pub global activate melos
 
       - name: Install Dependencies and Compile Assets
         run: melos prepare
+
+      - name: Compile sqlite3.wasm on macOS
+        if: runner.os == 'macOS'
+        working-directory: packages/sqlite3_wasm_build
+        run: ./build.sh
 
       - name: Create Draft Release
         env:
@@ -39,4 +49,4 @@ jobs:
           body="Release $tag
           $changes"
           gh release create "$tag" --title "$tag" --notes "$body"
-          gh release upload "${{ github.ref_name }}" packages/powersync/assets/powersync_db.worker.js packages/powersync/assets/powersync_sync.worker.js
+          gh release upload "${{ github.ref_name }}" packages/powersync/assets/powersync_db.worker.js packages/powersync/assets/powersync_sync.worker.js packages/sqlite3_wasm_build/dist/*.wasm

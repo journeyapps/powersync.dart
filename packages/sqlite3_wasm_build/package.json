@@ -1,0 +1,10 @@
+{
+  "name": "dart_powersync_wasm",
+  "version": "0.0.1",
+  "description": "WebAssembly modules containing SQLite + PowerSync for Dart apps.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/powersync-ja/powersync.dart.git",
+    "directory": "packages/sqlite3_wasm_build"
+  }
+}

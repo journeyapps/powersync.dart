@@ -1,0 +1,24 @@
+name: Build SQLite3 WASM
+
+on:
+  push:
+    branches: ["**"]
+
+jobs:
+  compile_sqlite3_wasm:
+    name: Compile sqlite3 wasm
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Homebrew
+        id: set-up-homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+      - name: Install Dart SDK
+        uses: dart-lang/setup-dart@v1
+      - name: Setup macOS build dependencies
+        run: brew install cmake llvm binaryen wasi-libc wasi-runtimes
+      - name: Compile sqlite3.wasm on macOS
+        if: runner.os == 'macOS'
+        working-directory: packages/sqlite3_wasm_build
+        run: ./build.sh
