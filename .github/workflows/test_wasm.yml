@@ -17,7 +17,7 @@ jobs:
       - name: Install Dart SDK
         uses: dart-lang/setup-dart@v1
       - name: Setup macOS build dependencies
-        run: brew install cmake llvm binaryen wasi-libc wasi-runtimes
+        run: brew install cmake llvm lld binaryen wasi-libc wasi-runtimes
       - name: Compile sqlite3.wasm on macOS
         if: runner.os == 'macOS'
         working-directory: packages/sqlite3_wasm_build
