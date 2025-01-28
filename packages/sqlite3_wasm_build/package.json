@@ -1,5 +1,5 @@
 {
-  "name": "dart_powersync_wasm",
+  "name": "@powersync/dart-wasm-bundles",
   "version": "0.0.1",
   "description": "WebAssembly modules containing SQLite + PowerSync for Dart apps.",
   "repository": {
