@@ -59,7 +59,7 @@ jobs:
           run_install: false
           version: 10
       - name: Publish npm package with WASM files
-        working-directory: packages/sqlite3/wasm_build
+        working-directory: packages/sqlite3_wasm_build
         run: |
           pnpm i
           npm version --allow-same-version --no-git-tag-version $(echo $GITHUB_REF_NAME | sed -E 's/powersync-v//')

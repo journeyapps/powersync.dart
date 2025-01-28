@@ -31,7 +31,7 @@ jobs:
           run_install: false
           version: 10
       - name: Dry-run npm publish
-        working-directory: packages/sqlite3/wasm_build
+        working-directory: packages/sqlite3_wasm_build
         run: |
           pnpm i
           pnpm publish --no-git-checks --dry-run
