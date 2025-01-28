@@ -63,7 +63,7 @@ jobs:
         run: |
           pnpm i
           npm version --allow-same-version --no-git-tag-version $(echo $GITHUB_REF_NAME | sed -E 's/powersync-v//')
-          pnpm publish --no-git-checks
+          pnpm publish --no-git-checks --access public
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
