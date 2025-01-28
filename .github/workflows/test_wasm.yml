@@ -29,6 +29,7 @@ jobs:
         name: Install pnpm
         with:
           run_install: false
+          version: 10
       - name: Dry-run npm publish
         working-directory: packages/sqlite3/wasm_build
         run: |
