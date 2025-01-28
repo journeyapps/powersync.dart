@@ -22,3 +22,15 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: packages/sqlite3_wasm_build
         run: ./build.sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v2
+        name: Install pnpm
+        with:
+          run_install: false
+      - name: Dry-run npm publish
+        working-directory: packages/sqlite3/wasm_build
+        run: |
+          pnpm i
+          pnpm publish --no-git-checks --dry-run
