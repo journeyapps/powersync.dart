@@ -19,6 +19,9 @@ copy_config_files() {
       echo "Copied contents of $template_config to ${template_config%/*}/$TARGET_CONFIG_FILE"
     fi
   done
+
+  # Create a new file .env for supabase-trello demo
+  echo -n > demos/supabase-trello/.env
 }
 
 # Call the function for the single demos folder

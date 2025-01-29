@@ -1,0 +1,19 @@
+#naive version with global access
+bucket_definitions:
+  global:
+    parameters: |
+      SELECT FROM trellouser WHERE
+         trellouser.id = token_parameters.user_id
+    data:
+      - SELECT * FROM trellouser
+      - SELECT * FROM workspace
+      - SELECT * FROM board
+      - SELECT * FROM activity
+      - SELECT * FROM attachment
+      - SELECT * FROM card
+      - SELECT * FROM checklist
+      - SELECT * FROM comment
+      - SELECT * FROM listboard
+      - SELECT * FROM member
+      - SELECT * FROM board_label
+      - SELECT * FROM card_label
