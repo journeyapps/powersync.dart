@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:powersync/powersync.dart';
 
 import './list_item.dart';
 import './list_item_dialog.dart';
@@ -51,6 +52,8 @@ class ListsWidget extends StatefulWidget {
 }
 
 class _ListsWidgetState extends State<ListsWidget> {
+  static final _listsPriority = BucketPriority(1);
+
   List<TodoList> _data = [];
   bool hasSynced = false;
   StreamSubscription? _subscription;
@@ -75,7 +78,7 @@ class _ListsWidgetState extends State<ListsWidget> {
         return;
       }
       setState(() {
-        hasSynced = status.hasSynced ?? false;
+        hasSynced = status.statusForPriority(_listsPriority).hasSynced ?? false;
       });
     });
   }

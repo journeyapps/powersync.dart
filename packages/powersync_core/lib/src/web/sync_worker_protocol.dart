@@ -157,6 +157,7 @@ extension type SerializedSyncStatus._(JSObject _) implements JSObject {
     required bool? hasSyned,
     required String? uploadError,
     required String? downloadError,
+    required JSArray? statusInPriority,
   });
 
   factory SerializedSyncStatus.from(SyncStatus status) {
@@ -169,6 +170,14 @@ extension type SerializedSyncStatus._(JSObject _) implements JSObject {
       hasSyned: status.hasSynced,
       uploadError: status.uploadError?.toString(),
       downloadError: status.downloadError?.toString(),
+      statusInPriority: <JSArray?>[
+        for (final entry in status.statusInPriority)
+          [
+            entry.priority.priorityNumber.toJS,
+            entry.lastSyncedAt?.microsecondsSinceEpoch.toJS,
+            entry.hasSynced?.toJS,
+          ].toJS
+      ].toJS,
     );
   }
 
@@ -180,6 +189,7 @@ extension type SerializedSyncStatus._(JSObject _) implements JSObject {
   external bool? hasSynced;
   external String? uploadError;
   external String? downloadError;
+  external JSArray? statusInPriority;
 
   SyncStatus asSyncStatus() {
     return SyncStatus(
@@ -193,6 +203,20 @@ extension type SerializedSyncStatus._(JSObject _) implements JSObject {
       hasSynced: hasSynced,
       uploadError: uploadError,
       downloadError: downloadError,
+      statusInPriority: statusInPriority?.toDart.map((e) {
+            final [rawPriority, rawSynced, rawHasSynced, ...] =
+                (e as JSArray).toDart;
+            final syncedMillis = (rawSynced as JSNumber?)?.toDartInt;
+
+            return (
+              priority: BucketPriority((rawPriority as JSNumber).toDartInt),
+              lastSyncedAt: syncedMillis != null
+                  ? DateTime.fromMicrosecondsSinceEpoch(syncedMillis)
+                  : null,
+              hasSynced: (rawHasSynced as JSBoolean?)?.toDart,
+            );
+          }).toList() ??
+          const [],
     );
   }
 }

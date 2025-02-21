@@ -55,7 +55,7 @@ class BucketStorage {
         await _updateBucket2(
             tx,
             jsonEncode({
-              'buckets': [b]
+              'buckets': [b],
             }));
       }
       // No need to flush - the data is not directly visible to the user either way.
@@ -101,9 +101,9 @@ class BucketStorage {
     return false;
   }
 
-  Future<SyncLocalDatabaseResult> syncLocalDatabase(
-      Checkpoint checkpoint) async {
-    final r = await validateChecksums(checkpoint);
+  Future<SyncLocalDatabaseResult> syncLocalDatabase(Checkpoint checkpoint,
+      {int? forPriority}) async {
+    final r = await validateChecksums(checkpoint, priority: forPriority);
 
     if (!r.checkpointValid) {
       for (String b in r.checkpointFailures ?? []) {
@@ -111,13 +111,16 @@ class BucketStorage {
       }
       return r;
     }
-    final bucketNames = [for (final c in checkpoint.checksums) c.bucket];
+    final bucketNames = [
+      for (final c in checkpoint.checksums)
+        if (forPriority == null || c.priority <= forPriority) c.bucket
+    ];
 
     await writeTransaction((tx) async {
       await tx.execute(
           "UPDATE ps_buckets SET last_op = ? WHERE name IN (SELECT json_each.value FROM json_each(?))",
           [checkpoint.lastOpId, jsonEncode(bucketNames)]);
-      if (checkpoint.writeCheckpoint != null) {
+      if (forPriority == null && checkpoint.writeCheckpoint != null) {
         await tx.execute(
             "UPDATE ps_buckets SET last_op = ? WHERE name = '\$local'",
             [checkpoint.writeCheckpoint]);
@@ -125,7 +128,8 @@ class BucketStorage {
       // Not flushing here - the flush will happen in the next step
     }, flush: false);
 
-    final valid = await updateObjectsFromBuckets(checkpoint);
+    final valid = await updateObjectsFromBuckets(checkpoint,
+        forPartialPriority: forPriority);
     if (!valid) {
       return SyncLocalDatabaseResult(ready: false);
     }
@@ -135,11 +139,25 @@ class BucketStorage {
     return SyncLocalDatabaseResult(ready: true);
   }
 
-  Future<bool> updateObjectsFromBuckets(Checkpoint checkpoint) async {
+  Future<bool> updateObjectsFromBuckets(Checkpoint checkpoint,
+      {int? forPartialPriority}) async {
     return writeTransaction((tx) async {
-      await tx.execute(
-          "INSERT INTO powersync_operations(op, data) VALUES(?, ?)",
-          ['sync_local', '']);
+      await tx
+          .execute("INSERT INTO powersync_operations(op, data) VALUES(?, ?)", [
+        'sync_local',
+        forPartialPriority != null
+            ? jsonEncode({
+                'priority': forPartialPriority,
+                // If we're at a partial checkpoint, we should only publish the
+                // buckets at the completed priority levels.
+                'buckets': [
+                  for (final desc in checkpoint.checksums)
+                    // Note that higher priorities are encoded as smaller values
+                    if (desc.priority <= forPartialPriority) desc.bucket,
+                ],
+              })
+            : null,
+      ]);
       final rs = await tx.execute('SELECT last_insert_rowid() as result');
       final result = rs[0]['result'];
       if (result == 1) {
@@ -154,10 +172,12 @@ class BucketStorage {
     }, flush: true);
   }
 
-  Future<SyncLocalDatabaseResult> validateChecksums(
-      Checkpoint checkpoint) async {
-    final rs = await select("SELECT powersync_validate_checkpoint(?) as result",
-        [jsonEncode(checkpoint)]);
+  Future<SyncLocalDatabaseResult> validateChecksums(Checkpoint checkpoint,
+      {int? priority}) async {
+    final rs =
+        await select("SELECT powersync_validate_checkpoint(?) as result", [
+      jsonEncode({...checkpoint.toJson(priority: priority)})
+    ]);
     final result =
         jsonDecode(rs[0]['result'] as String) as Map<String, dynamic>;
     if (result['valid'] as bool) {

@@ -32,6 +32,25 @@ Then deploy the following sync rules:
 ```yaml
 bucket_definitions:
   user_lists:
+    priority: 1
+    parameters: select id as list_id from lists where owner_id = request.user_id()
+    data:
+      - select * from lists where id = bucket.list_id
+
+  user_todos:
+    parameters: select id as list_id from lists where owner_id = request.user_id()
+    data:
+      - select * from todos where list_id = bucket.list_id
+```
+
+The rules synchronize list with a higher priority the items within the list. This can be
+useful to keep the list overview page reactive during a large sync cycle affecting many
+rows in the `user_todos` bucket. The two buckets can also be unified into a single one if
+priorities are not important (the app will work without changes):
+
+```yaml
+bucket_definitions:
+  user_lists:
     # Separate bucket per todo list
     parameters: select id as list_id from lists where owner_id = request.user_id()
     data:

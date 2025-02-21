@@ -39,6 +39,15 @@ const removeAsset1_4 = OplogEntry(
 const removeAsset1_5 = OplogEntry(
     opId: '5', op: OpType.remove, rowType: 'assets', rowId: 'O1', checksum: 5);
 
+BucketChecksum checksum(
+    {required String bucket, required int checksum, int priority = 1}) {
+  return BucketChecksum(bucket: bucket, priority: priority, checksum: checksum);
+}
+
+SyncDataBatch syncDataBatch(List<SyncBucketData> data) {
+  return SyncDataBatch(data);
+}
+
 void main() {
   group('Bucket Storage Tests', () {
     late PowerSyncDatabase powersync;
@@ -88,7 +97,7 @@ void main() {
       expect(await bucketStorage.getBucketStates(), equals([]));
       expect(await bucketStorage.hasCompletedSync(), equals(false));
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -101,7 +110,7 @@ void main() {
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       await expectAsset1_3();
 
@@ -119,7 +128,7 @@ void main() {
     });
 
     test('should get an object from multiple buckets', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_3],
@@ -128,8 +137,8 @@ void main() {
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '3', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 3),
-        BucketChecksum(bucket: 'bucket2', checksum: 3)
+        checksum(bucket: 'bucket1', checksum: 3),
+        checksum(bucket: 'bucket2', checksum: 3)
       ]));
 
       await expectAsset1_3();
@@ -140,14 +149,14 @@ void main() {
       // In this case, there are two different versions in the different buckets.
       // While we should not get this with our server implementation, the client still specifies this behaviour:
       // The largest op_id wins.
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [putAsset1_3]),
         SyncBucketData(bucket: 'bucket2', data: [putAsset1_1])
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '3', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 3),
-        BucketChecksum(bucket: 'bucket2', checksum: 1)
+        checksum(bucket: 'bucket1', checksum: 3),
+        checksum(bucket: 'bucket2', checksum: 1)
       ]));
 
       await expectAsset1_3();
@@ -155,14 +164,14 @@ void main() {
 
     test('should ignore a remove from one bucket', () async {
       // When we have 1 PUT and 1 REMOVE, the object must be kept.
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [putAsset1_3]),
         SyncBucketData(bucket: 'bucket2', data: [putAsset1_3, removeAsset1_4])
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '4', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 3),
-        BucketChecksum(bucket: 'bucket2', checksum: 7)
+        checksum(bucket: 'bucket1', checksum: 3),
+        checksum(bucket: 'bucket2', checksum: 7)
       ]));
 
       await expectAsset1_3();
@@ -170,70 +179,70 @@ void main() {
 
     test('should remove when removed from all buckets', () async {
       // When we only have REMOVE left for an object, it must be deleted.
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [putAsset1_3, removeAsset1_5]),
         SyncBucketData(bucket: 'bucket2', data: [putAsset1_3, removeAsset1_4])
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '5', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 8),
-        BucketChecksum(bucket: 'bucket2', checksum: 7)
+        checksum(bucket: 'bucket1', checksum: 8),
+        checksum(bucket: 'bucket2', checksum: 7)
       ]));
 
       await expectNoAssets();
     });
 
     test('put then remove', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [putAsset1_3]),
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '3', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 3),
+        checksum(bucket: 'bucket1', checksum: 3),
       ]));
 
       await expectAsset1_3();
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [removeAsset1_5])
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '5', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 8),
+        checksum(bucket: 'bucket1', checksum: 8),
       ]));
 
       await expectNoAssets();
     });
 
     test('blank remove', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [putAsset1_3, removeAsset1_4]),
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '4', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 7),
+        checksum(bucket: 'bucket1', checksum: 7),
       ]));
 
       await expectNoAssets();
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [removeAsset1_5])
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '5', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 12),
+        checksum(bucket: 'bucket1', checksum: 12),
       ]));
 
       await expectNoAssets();
     });
 
     test('put | put remove', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [putAsset1_1]),
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '1', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 1),
+        checksum(bucket: 'bucket1', checksum: 1),
       ]));
 
       expect(
@@ -243,13 +252,13 @@ void main() {
             {'id': 'O1', 'description': 'bar', 'make': null}
           ]));
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [putAsset1_3]),
         SyncBucketData(bucket: 'bucket1', data: [removeAsset1_5])
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '5', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 9),
+        checksum(bucket: 'bucket1', checksum: 9),
       ]));
 
       await expectNoAssets();
@@ -275,13 +284,13 @@ void main() {
           rowId: 'O1',
           checksum: 5);
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
             bucket: 'bucket1', data: [putAsset1_1, putAsset1_3, put4]),
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '4', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 8),
+        checksum(bucket: 'bucket1', checksum: 8),
       ]));
 
       expect(
@@ -291,12 +300,12 @@ void main() {
             {'id': 'O1', 'description': 'B', 'make': null}
           ]));
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [remove5]),
       ]));
 
       await syncLocalChecked(Checkpoint(lastOpId: '5', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 13),
+        checksum(bucket: 'bucket1', checksum: 13),
       ]));
 
       await expectAsset1_3();
@@ -304,15 +313,15 @@ void main() {
 
     test('should fail checksum validation', () async {
       // Simple checksum validation
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
             bucket: 'bucket1', data: [putAsset1_1, putAsset2_2, putAsset1_3]),
       ]));
 
       var result = await bucketStorage
           .syncLocalDatabase(Checkpoint(lastOpId: '3', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 10),
-        BucketChecksum(bucket: 'bucket2', checksum: 1)
+        checksum(bucket: 'bucket1', checksum: 10),
+        checksum(bucket: 'bucket2', checksum: 1)
       ]));
       expect(
           result,
@@ -325,7 +334,7 @@ void main() {
     });
 
     test('should delete buckets', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_3],
@@ -340,7 +349,7 @@ void main() {
       // The delete only takes effect after syncLocal.
 
       await syncLocalChecked(Checkpoint(lastOpId: '3', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 3),
+        checksum(bucket: 'bucket1', checksum: 3),
       ]));
 
       // Bucket is deleted, but object is still present in other buckets.
@@ -354,7 +363,7 @@ void main() {
 
     test('should delete and re-create buckets', () async {
       // Save some data
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1],
@@ -365,7 +374,7 @@ void main() {
       await bucketStorage.removeBuckets(['bucket1']);
 
       // Save some data again
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset1_3],
@@ -375,7 +384,7 @@ void main() {
       await bucketStorage.removeBuckets(['bucket1']);
 
       // Final save of data
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset1_3],
@@ -384,7 +393,7 @@ void main() {
 
       // Check that the data is there
       await syncLocalChecked(Checkpoint(lastOpId: '3', checksums: [
-        BucketChecksum(bucket: 'bucket1', checksum: 4),
+        checksum(bucket: 'bucket1', checksum: 4),
       ]));
       await expectAsset1_3();
 
@@ -395,14 +404,14 @@ void main() {
     });
 
     test('should handle MOVE', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [OplogEntry(opId: '1', op: OpType.move, checksum: 1)],
         ),
       ]));
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_3],
@@ -411,14 +420,14 @@ void main() {
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 4)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 4)]));
 
       await expectAsset1_3();
     });
 
     test('should handle CLEAR', () async {
       // Save some data
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1],
@@ -427,10 +436,10 @@ void main() {
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '1',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 1)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 1)]));
 
       // CLEAR, then save new data
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [
@@ -449,7 +458,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           // 2 + 3. 1 is replaced with 2.
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 5)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 5)]));
 
       await expectNoAsset1();
       expect(
@@ -472,7 +481,7 @@ void main() {
       await powersync.initialize();
       bucketStorage = BucketStorage(powersync);
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -481,7 +490,7 @@ void main() {
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '4',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       await expectLater(() async {
         await powersync.execute('SELECT * FROM assets');
@@ -499,7 +508,7 @@ void main() {
     });
 
     test('should remove types', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -508,7 +517,7 @@ void main() {
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       await expectAsset1_3();
 
@@ -537,7 +546,7 @@ void main() {
       // Test compacting behaviour.
       // This test relies heavily on internals, and will have to be updated when the compact implementation is updated.
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
             bucket: 'bucket1', data: [putAsset1_1, putAsset2_2, removeAsset1_4])
       ]));
@@ -545,14 +554,14 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '4',
           writeCheckpoint: '4',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 7)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 7)]));
 
       await bucketStorage.forceCompact();
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '4',
           writeCheckpoint: '4',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 7)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 7)]));
 
       final stats = await powersync.execute(
           'SELECT row_type as type, row_id as id, count(*) as count FROM ps_oplog GROUP BY row_type, row_id ORDER BY row_type, row_id');
@@ -564,7 +573,7 @@ void main() {
     });
 
     test('should compact with checksum wrapping', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [
           OplogEntry(
               opId: '1',
@@ -593,18 +602,14 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '4',
           writeCheckpoint: '4',
-          checksums: [
-            BucketChecksum(bucket: 'bucket1', checksum: 2147483642)
-          ]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 2147483642)]));
 
       await bucketStorage.forceCompact();
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '4',
           writeCheckpoint: '4',
-          checksums: [
-            BucketChecksum(bucket: 'bucket1', checksum: 2147483642)
-          ]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 2147483642)]));
 
       final stats = await powersync.execute(
           'SELECT row_type as type, row_id as id, count(*) as count FROM ps_oplog GROUP BY row_type, row_id ORDER BY row_type, row_id');
@@ -616,7 +621,7 @@ void main() {
     });
 
     test('should compact with checksum wrapping (2)', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(bucket: 'bucket1', data: [
           OplogEntry(
               opId: '1',
@@ -638,14 +643,14 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '4',
           writeCheckpoint: '4',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: -3)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: -3)]));
 
       await bucketStorage.forceCompact();
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '4',
           writeCheckpoint: '4',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: -3)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: -3)]));
 
       final stats = await powersync.execute(
           'SELECT row_type as type, row_id as id, count(*) as count FROM ps_oplog GROUP BY row_type, row_id ORDER BY row_type, row_id');
@@ -658,7 +663,7 @@ void main() {
 
     test('should not sync local db with pending crud - server removed',
         () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -667,7 +672,7 @@ void main() {
 
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       // Local save
       powersync.execute('INSERT INTO assets(id) VALUES(?)', ['O3']);
@@ -681,7 +686,7 @@ void main() {
       final result = await bucketStorage.syncLocalDatabase(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
       expect(result, equals(SyncLocalDatabaseResult(ready: false)));
 
       final batch = await bucketStorage.getCrudBatch();
@@ -694,7 +699,7 @@ void main() {
       final result3 = await bucketStorage.syncLocalDatabase(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
       expect(result3, equals(SyncLocalDatabaseResult(ready: false)));
 
       // The data must still be present locally.
@@ -705,14 +710,14 @@ void main() {
           ]));
 
       await bucketStorage.saveSyncData(
-          SyncDataBatch([SyncBucketData(bucket: 'bucket1', data: [])]));
+          syncDataBatch([SyncBucketData(bucket: 'bucket1', data: [])]));
 
       // Now we have synced the data back (or lack of data in this case),
       // so we can do a local sync.
       await syncLocalChecked(Checkpoint(
           lastOpId: '5',
           writeCheckpoint: '5',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       // Since the object was not in the sync response, it is deleted.
       expect(await powersync.execute('SELECT id FROM assets WHERE id = \'O3\''),
@@ -722,7 +727,7 @@ void main() {
     test(
         'should not sync local db with pending crud when more crud is added (1)',
         () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -732,7 +737,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       // Local save
       powersync.execute('INSERT INTO assets(id) VALUES(?)', ['O3']);
@@ -746,11 +751,11 @@ void main() {
       final result3 = await bucketStorage.syncLocalDatabase(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
       expect(result3, equals(SyncLocalDatabaseResult(ready: false)));
 
       await bucketStorage.saveSyncData(
-          SyncDataBatch([SyncBucketData(bucket: 'bucket1', data: [])]));
+          syncDataBatch([SyncBucketData(bucket: 'bucket1', data: [])]));
 
       // Add more data before syncLocalDatabase.
       powersync.execute('INSERT INTO assets(id) VALUES(?)', ['O4']);
@@ -758,14 +763,14 @@ void main() {
       final result4 = await bucketStorage.syncLocalDatabase(Checkpoint(
           lastOpId: '5',
           writeCheckpoint: '5',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
       expect(result4, equals(SyncLocalDatabaseResult(ready: false)));
     });
 
     test(
         'should not sync local db with pending crud when more crud is added (2)',
         () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -775,7 +780,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       // Local save
       await powersync.execute('INSERT INTO assets(id) VALUES(?)', ['O3']);
@@ -788,7 +793,7 @@ void main() {
         return '4';
       });
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [],
@@ -798,13 +803,13 @@ void main() {
       final result4 = await bucketStorage.syncLocalDatabase(Checkpoint(
           lastOpId: '5',
           writeCheckpoint: '5',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
       expect(result4, equals(SyncLocalDatabaseResult(ready: false)));
     });
 
     test('should not sync local db with pending crud - update on server',
         () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -814,7 +819,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       // Local save
       powersync.execute('INSERT INTO assets(id) VALUES(?)', ['O3']);
@@ -824,7 +829,7 @@ void main() {
         return '4';
       });
 
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [
@@ -842,7 +847,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '5',
           writeCheckpoint: '5',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 11)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 11)]));
 
       expect(
           await powersync
@@ -853,7 +858,7 @@ void main() {
     });
 
     test('should revert a failing insert', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -863,7 +868,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       // Local insert, later rejected by server
       await powersync.execute(
@@ -885,7 +890,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '4',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       expect(
           await powersync
@@ -894,7 +899,7 @@ void main() {
     });
 
     test('should revert a failing delete', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -904,7 +909,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       // Local delete, later rejected by server
       await powersync.execute('DELETE FROM assets WHERE id = ?', ['O2']);
@@ -924,7 +929,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '4',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       expect(
           await powersync
@@ -935,7 +940,7 @@ void main() {
     });
 
     test('should revert a failing update', () async {
-      await bucketStorage.saveSyncData(SyncDataBatch([
+      await bucketStorage.saveSyncData(syncDataBatch([
         SyncBucketData(
           bucket: 'bucket1',
           data: [putAsset1_1, putAsset2_2, putAsset1_3],
@@ -945,7 +950,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '3',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       // Local update, later rejected by server
       await powersync.execute(
@@ -968,7 +973,7 @@ void main() {
       await syncLocalChecked(Checkpoint(
           lastOpId: '3',
           writeCheckpoint: '4',
-          checksums: [BucketChecksum(bucket: 'bucket1', checksum: 6)]));
+          checksums: [checksum(bucket: 'bucket1', checksum: 6)]));
 
       expect(
           await powersync

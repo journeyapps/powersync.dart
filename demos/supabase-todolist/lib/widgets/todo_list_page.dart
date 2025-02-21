@@ -79,11 +79,20 @@ class TodoListWidgetState extends State<TodoListWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      children: _data.map((todo) {
-        return TodoItemWidget(todo: todo);
-      }).toList(),
+    return StreamBuilder(
+      stream: TodoList.watchSyncStatus().map((e) => e.hasSynced),
+      builder: (context, snapshot) {
+        if (snapshot.data ?? false) {
+          return const Text('Busy with sync');
+        }
+
+        return ListView(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          children: _data.map((todo) {
+            return TodoItemWidget(todo: todo);
+          }).toList(),
+        );
+      },
     );
   }
 }

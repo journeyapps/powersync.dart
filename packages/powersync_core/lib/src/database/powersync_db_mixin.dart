@@ -121,27 +121,66 @@ mixin PowerSyncDatabaseMixin implements SqliteConnection {
 
   Future<void> _updateHasSynced() async {
     // Query the database to see if any data has been synced.
-    final result =
-        await database.get('SELECT powersync_last_synced_at() as synced_at');
-    final timestamp = result['synced_at'] as String?;
-    final hasSynced = timestamp != null;
+    final result = await database.getAll(
+      'SELECT priority, last_synced_at FROM ps_sync_state ORDER BY priority;',
+    );
+    const prioritySentinel = 2147483647;
+    var hasSynced = false;
+    DateTime? lastCompleteSync;
+    final priorityStatus = <SyncPriorityStatus>[];
+
+    DateTime parseDateTime(String sql) {
+      return DateTime.parse('${sql}Z').toLocal();
+    }
+
+    for (final row in result) {
+      final priority = row.columnAt(0) as int;
+      final lastSyncedAt = parseDateTime(row.columnAt(1) as String);
+
+      if (priority == prioritySentinel) {
+        hasSynced = true;
+        lastCompleteSync = lastSyncedAt;
+      } else {
+        priorityStatus.add((
+          hasSynced: true,
+          lastSyncedAt: lastSyncedAt,
+          priority: BucketPriority(priority)
+        ));
+      }
+    }
 
     if (hasSynced != currentStatus.hasSynced) {
-      final lastSyncedAt =
-          timestamp == null ? null : DateTime.parse('${timestamp}Z').toLocal();
-      final status =
-          SyncStatus(hasSynced: hasSynced, lastSyncedAt: lastSyncedAt);
+      final status = SyncStatus(
+        hasSynced: hasSynced,
+        lastSyncedAt: lastCompleteSync,
+        statusInPriority: priorityStatus,
+      );
       setStatus(status);
     }
   }
 
-  /// Returns a [Future] which will resolve once the first full sync has completed.
-  Future<void> waitForFirstSync() async {
-    if (currentStatus.hasSynced ?? false) {
+  /// Returns a [Future] which will resolve once at least one full sync cycle
+  /// has completed (meaninng that the first consistent checkpoint has been
+  /// reached across all buckets).
+  ///
+  /// When [priority] is null (the default), this method waits for the first
+  /// full sync checkpoint to complete. When set to a [BucketPriority] however,
+  /// it completes once all buckets within that priority (as well as those in
+  /// higher priorities) have been synchronized at least once.
+  Future<void> waitForFirstSync({BucketPriority? priority}) async {
+    bool matches(SyncStatus status) {
+      if (priority == null) {
+        return status.hasSynced == true;
+      } else {
+        return status.statusForPriority(priority).hasSynced == true;
+      }
+    }
+
+    if (matches(currentStatus)) {
       return;
     }
     await for (final result in statusStream) {
-      if (result.hasSynced ?? false) {
+      if (matches(result)) {
         break;
       }
     }
@@ -187,7 +226,10 @@ mixin PowerSyncDatabaseMixin implements SqliteConnection {
     await disconnect();
     // Now we can close the database
     await database.close();
-    await statusStreamController.close();
+
+    // If there are paused subscriptionso n the status stream, don't delay
+    // closing the database because of that.
+    unawaited(statusStreamController.close());
   }
 
   /// Connect to the PowerSync service, and keep the databases in sync.

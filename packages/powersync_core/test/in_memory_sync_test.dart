@@ -78,7 +78,7 @@ void main() {
         'checkpoint': Checkpoint(
           lastOpId: '0',
           writeCheckpoint: null,
-          checksums: [BucketChecksum(bucket: 'bkt', checksum: 0)],
+          checksums: [BucketChecksum(bucket: 'bkt', priority: 1, checksum: 0)],
         )
       });
       await expectLater(status, emits(isSyncStatus(downloading: true)));
@@ -94,6 +94,12 @@ void main() {
       // is should reconstruct hasSynced from the database.
       await independentDb.initialize();
       expect(independentDb.currentStatus.hasSynced, isTrue);
+      // A complete sync also means that all partial syncs have completed
+      expect(
+          independentDb.currentStatus
+              .statusForPriority(BucketPriority(3))
+              .hasSynced,
+          isTrue);
     });
 
     test('can save independent buckets in same transaction', () async {
@@ -104,8 +110,8 @@ void main() {
           lastOpId: '0',
           writeCheckpoint: null,
           checksums: [
-            BucketChecksum(bucket: 'a', checksum: 0),
-            BucketChecksum(bucket: 'b', checksum: 0),
+            BucketChecksum(bucket: 'a', checksum: 0, priority: 3),
+            BucketChecksum(bucket: 'b', checksum: 0, priority: 3),
           ],
         )
       });
@@ -154,6 +160,122 @@ void main() {
       // The two buckets should have been inserted in a single transaction
       // because the messages were received in quick succession.
       expect(commits, 1);
+    });
+
+    group('partial sync', () {
+      test('updates sync state incrementally', () async {
+        final status = await waitForConnection();
+
+        final checksums = [
+          for (var prio = 0; prio <= 3; prio++)
+            BucketChecksum(
+                bucket: 'prio$prio', priority: prio, checksum: 10 + prio)
+        ];
+        syncService.addLine({
+          'checkpoint': Checkpoint(
+            lastOpId: '4',
+            writeCheckpoint: null,
+            checksums: checksums,
+          )
+        });
+        var operationId = 1;
+
+        void addRow(int priority) {
+          syncService.addLine({
+            'data': {
+              'bucket': 'prio$priority',
+              'data': [
+                {
+                  'checksum': priority + 10,
+                  'data': {'name': 'test', 'email': 'email'},
+                  'op': 'PUT',
+                  'op_id': '${operationId++}',
+                  'object_id': 'prio$priority',
+                  'object_type': 'customers'
+                }
+              ]
+            }
+          });
+        }
+
+        // Receiving the checkpoint sets the state to downloading
+        await expectLater(
+            status, emits(isSyncStatus(downloading: true, hasSynced: false)));
+
+        // Emit partial sync complete for each priority but the last.
+        for (var prio = 0; prio < 3; prio++) {
+          addRow(prio);
+          syncService.addLine({
+            'partial_checkpoint_complete': {
+              'last_op_id': operationId.toString(),
+              'priority': prio,
+            }
+          });
+
+          await expectLater(
+            status,
+            emits(isSyncStatus(downloading: true, hasSynced: false).having(
+              (e) => e.statusForPriority(BucketPriority(0)).hasSynced,
+              'status for $prio',
+              isTrue,
+            )),
+          );
+
+          await database.waitForFirstSync(priority: BucketPriority(prio));
+          expect(await database.getAll('SELECT * FROM customers'),
+              hasLength(prio + 1));
+        }
+
+        // Complete the sync
+        addRow(3);
+        syncService.addLine({
+          'checkpoint_complete': {'last_op_id': operationId.toString()}
+        });
+
+        await expectLater(
+            status, emits(isSyncStatus(downloading: false, hasSynced: true)));
+        await database.waitForFirstSync();
+        expect(await database.getAll('SELECT * FROM customers'), hasLength(4));
+      });
+
+      test('remembers last partial sync state', () async {
+        final status = await waitForConnection();
+
+        syncService.addLine({
+          'checkpoint': Checkpoint(
+            lastOpId: '0',
+            writeCheckpoint: null,
+            checksums: [
+              BucketChecksum(bucket: 'bkt', priority: 1, checksum: 0)
+            ],
+          )
+        });
+        await expectLater(status, emits(isSyncStatus(downloading: true)));
+
+        syncService.addLine({
+          'partial_checkpoint_complete': {
+            'last_op_id': '0',
+            'priority': 1,
+          }
+        });
+        await database.waitForFirstSync(priority: BucketPriority(1));
+        expect(database.currentStatus.hasSynced, isFalse);
+
+        final independentDb = factory.wrapRaw(raw);
+        await independentDb.initialize();
+        expect(independentDb.currentStatus.hasSynced, isFalse);
+        // Completing a sync for prio 1 implies a completed sync for prio 0
+        expect(
+            independentDb.currentStatus
+                .statusForPriority(BucketPriority(0))
+                .hasSynced,
+            isTrue);
+        expect(
+            independentDb.currentStatus
+                .statusForPriority(BucketPriority(3))
+                .hasSynced,
+            isFalse);
+      });
     });
   });
 }

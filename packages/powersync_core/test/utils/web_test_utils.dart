@@ -3,7 +3,7 @@ import 'dart:js_interop';
 
 import 'package:logging/logging.dart';
 import 'package:powersync_core/powersync_core.dart';
-import 'package:sqlite3/wasm.dart';
+import 'package:sqlite_async/sqlite3_wasm.dart';
 import 'package:sqlite_async/sqlite_async.dart';
 import 'package:test/test.dart';
 import 'package:web/web.dart' show Blob, BlobPropertyBag;
@@ -62,9 +62,9 @@ class TestUtils extends AbstractTestUtils {
   Future<void> cleanDb({required String path}) async {}
 
   @override
-  Future<TestOpenFactory> testFactory(
+  Future<TestPowerSyncFactory> testFactory(
       {String? path,
-      String? sqlitePath,
+      String sqlitePath = '',
       SqliteOptions options = const SqliteOptions.defaults()}) async {
     await _isInitialized;
 

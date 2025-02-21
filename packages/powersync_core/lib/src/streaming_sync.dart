@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert' as convert;
 
+import 'package:collection/collection.dart';
 import 'package:http/http.dart' as http;
 import 'package:powersync_core/src/abort_controller.dart';
 import 'package:powersync_core/src/exceptions.dart';
@@ -118,6 +119,7 @@ class StreamingSyncImplementation implements StreamingSync {
 
     // Now close the client in all cases not covered above
     _client.close();
+    _statusStreamController.close();
   }
 
   bool get aborted {
@@ -273,58 +275,95 @@ class StreamingSyncImplementation implements StreamingSync {
     return body['data']['write_checkpoint'] as String;
   }
 
+  void _updateStatusForPriority(SyncPriorityStatus completed) {
+    // Note: statusInPriority is sorted by priorities (ascending)
+    final existingPriorityState = lastStatus.statusInPriority;
+
+    for (final (i, priority) in existingPriorityState.indexed) {
+      switch (
+          BucketPriority.comparator(priority.priority, completed.priority)) {
+        case > 0:
+          // Entries from here on have a higher priority than the one that was
+          // just completed
+          final copy = existingPriorityState.toList();
+          copy.insert(i, completed);
+          _updateStatus(statusInPriority: copy);
+          return;
+        case 0:
+          final copy = existingPriorityState.toList();
+          copy[i] = completed;
+          _updateStatus(statusInPriority: copy);
+          return;
+        case < 0:
+          continue;
+      }
+    }
+
+    _updateStatus(statusInPriority: [...existingPriorityState, completed]);
+  }
+
   /// Update sync status based on any non-null parameters.
   /// To clear errors, use [_noError] instead of null.
-  void _updateStatus(
-      {DateTime? lastSyncedAt,
-      bool? hasSynced,
-      bool? connected,
-      bool? connecting,
-      bool? downloading,
-      bool? uploading,
-      Object? uploadError,
-      Object? downloadError}) {
+  void _updateStatus({
+    DateTime? lastSyncedAt,
+    bool? hasSynced,
+    bool? connected,
+    bool? connecting,
+    bool? downloading,
+    bool? uploading,
+    Object? uploadError,
+    Object? downloadError,
+    List<SyncPriorityStatus>? statusInPriority,
+  }) {
     final c = connected ?? lastStatus.connected;
     var newStatus = SyncStatus(
-        connected: c,
-        connecting: !c && (connecting ?? lastStatus.connecting),
-        lastSyncedAt: lastSyncedAt ?? lastStatus.lastSyncedAt,
-        hasSynced: hasSynced ?? lastStatus.hasSynced,
-        downloading: downloading ?? lastStatus.downloading,
-        uploading: uploading ?? lastStatus.uploading,
-        uploadError: uploadError == _noError
-            ? null
-            : (uploadError ?? lastStatus.uploadError),
-        downloadError: downloadError == _noError
-            ? null
-            : (downloadError ?? lastStatus.downloadError));
-    lastStatus = newStatus;
-    _statusStreamController.add(newStatus);
+      connected: c,
+      connecting: !c && (connecting ?? lastStatus.connecting),
+      lastSyncedAt: lastSyncedAt ?? lastStatus.lastSyncedAt,
+      hasSynced: hasSynced ?? lastStatus.hasSynced,
+      downloading: downloading ?? lastStatus.downloading,
+      uploading: uploading ?? lastStatus.uploading,
+      uploadError: uploadError == _noError
+          ? null
+          : (uploadError ?? lastStatus.uploadError),
+      downloadError: downloadError == _noError
+          ? null
+          : (downloadError ?? lastStatus.downloadError),
+      statusInPriority: statusInPriority ?? lastStatus.statusInPriority,
+    );
+
+    if (!_statusStreamController.isClosed) {
+      lastStatus = newStatus;
+      _statusStreamController.add(newStatus);
+    }
+  }
+
+  Future<(List<BucketRequest>, Map<String, BucketDescription?>)>
+      _collectLocalBucketState() async {
+    final bucketEntries = await adapter.getBucketStates();
+
+    final initialRequests = [
+      for (final entry in bucketEntries) BucketRequest(entry.bucket, entry.opId)
+    ];
+    final localDescriptions = {
+      for (final entry in bucketEntries) entry.bucket: null
+    };
+
+    return (initialRequests, localDescriptions);
   }
 
   Future<bool> streamingSyncIteration(
       {AbortController? abortController}) async {
     adapter.startSession();
-    final bucketEntries = await adapter.getBucketStates();
 
-    Map<String, String> initialBucketStates = {};
-
-    for (final entry in bucketEntries) {
-      initialBucketStates[entry.bucket] = entry.opId;
-    }
-
-    final List<BucketRequest> buckets = [];
-    for (var entry in initialBucketStates.entries) {
-      buckets.add(BucketRequest(entry.key, entry.value));
-    }
+    var (bucketRequests, bucketMap) = await _collectLocalBucketState();
 
     Checkpoint? targetCheckpoint;
     Checkpoint? validatedCheckpoint;
     Checkpoint? appliedCheckpoint;
-    var bucketSet = Set<String>.from(initialBucketStates.keys);
 
     var requestStream = streamingSyncRequest(
-        StreamingSyncRequest(buckets, syncParameters, clientId!));
+        StreamingSyncRequest(bucketRequests, syncParameters, clientId!));
 
     var merged = addBroadcast(requestStream, _localPingController.stream);
 
@@ -343,13 +382,16 @@ class StreamingSyncImplementation implements StreamingSync {
       switch (line) {
         case Checkpoint():
           targetCheckpoint = line;
-          final Set<String> bucketsToDelete = {...bucketSet};
-          final Set<String> newBuckets = {};
+          final Set<String> bucketsToDelete = {...bucketMap.keys};
+          final Map<String, BucketDescription> newBuckets = {};
           for (final checksum in line.checksums) {
-            newBuckets.add(checksum.bucket);
+            newBuckets[checksum.bucket] = (
+              name: checksum.bucket,
+              priority: checksum.priority,
+            );
             bucketsToDelete.remove(checksum.bucket);
           }
-          bucketSet = newBuckets;
+          bucketMap = newBuckets;
           await adapter.removeBuckets([...bucketsToDelete]);
           _updateStatus(downloading: true);
         case StreamingSyncCheckpointComplete():
@@ -365,13 +407,46 @@ class StreamingSyncImplementation implements StreamingSync {
           } else {
             appliedCheckpoint = targetCheckpoint;
 
+            final now = DateTime.now();
             _updateStatus(
-                downloading: false,
-                downloadError: _noError,
-                lastSyncedAt: DateTime.now());
+              downloading: false,
+              downloadError: _noError,
+              lastSyncedAt: now,
+              statusInPriority: [
+                if (appliedCheckpoint.checksums.isNotEmpty)
+                  (
+                    hasSynced: true,
+                    lastSyncedAt: now,
+                    priority: maxBy(
+                      appliedCheckpoint.checksums
+                          .map((cs) => BucketPriority(cs.priority)),
+                      (priority) => priority,
+                      compare: BucketPriority.comparator,
+                    )!,
+                  )
+              ],
+            );
           }
 
           validatedCheckpoint = targetCheckpoint;
+        case StreamingSyncCheckpointPartiallyComplete(:final bucketPriority):
+          final result = await adapter.syncLocalDatabase(targetCheckpoint!,
+              forPriority: bucketPriority);
+          if (!result.checkpointValid) {
+            // This means checksums failed. Start again with a new checkpoint.
+            // TODO: better back-off
+            // await new Promise((resolve) => setTimeout(resolve, 50));
+            return false;
+          } else if (!result.ready) {
+            // Checksums valid, but need more data for a consistent checkpoint.
+            // Continue waiting.
+          } else {
+            _updateStatusForPriority((
+              priority: BucketPriority(bucketPriority),
+              lastSyncedAt: DateTime.now(),
+              hasSynced: true,
+            ));
+          }
         case StreamingSyncCheckpointDiff():
           // TODO: It may be faster to just keep track of the diff, instead of
           // the entire checkpoint
@@ -398,7 +473,8 @@ class StreamingSyncImplementation implements StreamingSync {
               writeCheckpoint: diff.writeCheckpoint);
           targetCheckpoint = newCheckpoint;
 
-          bucketSet = Set.from(newBuckets.keys);
+          bucketMap = newBuckets.map((name, checksum) =>
+              MapEntry(name, (name: name, priority: checksum.priority)));
           await adapter.removeBuckets(diff.removedBuckets);
           adapter.setTargetCheckpoint(targetCheckpoint);
         case SyncDataBatch():
